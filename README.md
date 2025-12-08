@@ -1,4 +1,4 @@
-# FluoroCount
+# Manual cell counting tool
 
 A desktop application for manual cell counting in fluorescence microscopy images.
 
