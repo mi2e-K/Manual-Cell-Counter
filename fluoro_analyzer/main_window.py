@@ -472,7 +472,7 @@ class FluoroAnalyzer(QMainWindow):
             'Ctrl+O': self.open_file,
             'Ctrl+Z': self.undo_last_marker,
             'Ctrl+Shift+Z': self.redo_marker,
-            'Ctrl+S': self.export_csv,
+            'Ctrl+S': self.export_all,
             'Escape': self.cancel_roi,
             'Space': self.cycle_active_cell_type,
             'F': lambda: self.set_tool_mode(ToolMode.CELL_COUNT),
@@ -891,6 +891,10 @@ class FluoroAnalyzer(QMainWindow):
             self.update_image_info()
             self.update_results_table()
             self.status_bar.showMessage(f"Loaded: {path.name}")
+            
+            # Restore focus to main window for shortcuts to work
+            self.activateWindow()
+            self.setFocus()
             
             # Check for existing coordinate file
             coord_file = path.parent / f"{path.stem}_coordinates.json"
