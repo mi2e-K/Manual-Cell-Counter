@@ -411,18 +411,9 @@ class FluoroAnalyzer(QMainWindow):
         
         layout.addWidget(export_group)
         
-        # Export/Import buttons
-        btn_layout = QHBoxLayout()
-        
         export_btn = QPushButton("💾 Export")
         export_btn.clicked.connect(self.export_all)
-        btn_layout.addWidget(export_btn)
-        
-        import_btn = QPushButton("📥 Import")
-        import_btn.clicked.connect(self.import_coordinates_dialog)
-        btn_layout.addWidget(import_btn)
-        
-        layout.addLayout(btn_layout)
+        layout.addWidget(export_btn)
         
         layout.addStretch()
         
@@ -463,6 +454,10 @@ class FluoroAnalyzer(QMainWindow):
         export_action = QAction("💾 Export", self)
         export_action.triggered.connect(self.export_all)
         toolbar.addAction(export_action)
+        
+        import_action = QAction("📥 Import", self)
+        import_action.triggered.connect(self.import_coordinates_dialog)
+        toolbar.addAction(import_action)
     
     def setup_shortcuts(self):
         """Setup keyboard shortcuts."""
@@ -479,7 +474,11 @@ class FluoroAnalyzer(QMainWindow):
             'Ctrl+Shift+Z': self.redo_marker,
             'Ctrl+S': self.export_csv,
             'Escape': self.cancel_roi,
-            'Space': self.toggle_tool_mode,
+            'Space': self.cycle_active_cell_type,
+            'F': lambda: self.set_tool_mode(ToolMode.CELL_COUNT),
+            'D': lambda: self.set_tool_mode(ToolMode.ROI_DRAW),
+            'E': lambda: self.set_tool_mode(ToolMode.PAN),
+            'V': self.canvas.reset_view,
         }
         
         for key, callback in shortcuts.items():
@@ -758,12 +757,25 @@ class FluoroAnalyzer(QMainWindow):
         mode_names = {ToolMode.PAN: "Pan", ToolMode.CELL_COUNT: "Count", ToolMode.ROI_DRAW: "ROI"}
         self.status_bar.showMessage(f"Mode: {mode_names[mode]}")
     
-    def toggle_tool_mode(self):
-        """Toggle between pan and count mode."""
-        if self.canvas.tool_mode == ToolMode.PAN:
-            self.set_tool_mode(ToolMode.CELL_COUNT)
+    def cycle_active_cell_type(self):
+        """Cycle through available cell types."""
+        if not self.cell_types:
+            return
+        
+        type_names = list(self.cell_types.keys())
+        if not type_names:
+            return
+        
+        if self.current_cell_type in type_names:
+            current_index = type_names.index(self.current_cell_type)
+            next_index = (current_index + 1) % len(type_names)
         else:
-            self.set_tool_mode(ToolMode.PAN)
+            next_index = 0
+        
+        next_type = type_names[next_index]
+        self.current_cell_type = next_type
+        self.active_cell_combo.setCurrentText(next_type)
+        self.status_bar.showMessage(f"Active cell type: {next_type}")
     
     def set_active_cell_type(self, name: str):
         """Set the active cell type."""
