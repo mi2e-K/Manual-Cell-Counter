@@ -16,7 +16,7 @@ from PyQt6.QtWidgets import (
     QColorDialog, QMessageBox, QStatusBar, QToolBar, QSplitter,
     QScrollArea, QFrame, QLineEdit, QTableWidget, QTableWidgetItem,
     QHeaderView, QAbstractItemView, QInputDialog, QMenu, QCheckBox,
-    QDialog, QDialogButtonBox
+    QDialog, QDialogButtonBox, QApplication, QProgressDialog
 )
 from PyQt6.QtCore import Qt, QPointF, QTimer
 from PyQt6.QtGui import (
@@ -1679,51 +1679,108 @@ class FluoroAnalyzer(QMainWindow):
         base_name = Path(self.current_file).stem
         base_path = str(Path(output_dir) / base_name)
         
-        exported_files = []
-        
+        # Count total steps for progress
+        total_steps = 0
         if self.export_csv_checkbox.isChecked():
-            csv_path = f"{base_path}_results.csv"
-            try:
-                with open(csv_path, 'w', newline='') as f:
-                    writer = csv.writer(f)
-                    image_name = Path(self.current_file).name
-                    
-                    # Write marker details section
-                    writer.writerow(["=== Marker Details ==="])
-                    writer.writerow(["Image", "Cell Type", "Marker #", "X", "Y", "ROI"])
-                    for marker in markers_in_roi:
-                        writer.writerow([
-                            image_name, marker.cell_type, marker.marker_number,
-                            f"{marker.position.x():.2f}", f"{marker.position.y():.2f}",
-                            marker.roi_name
-                        ])
-                    
-                    # Write summary section with all combinations (including zeros)
-                    writer.writerow([])  # Empty row separator
-                    writer.writerow(["=== Summary (per ROI) ==="])
-                    writer.writerow(["Image", "ROI", "Cell Type", "Count"])
-                    
-                    for roi in closed_rois:
-                        for cell_type_name in self.cell_types.keys():
-                            count = sum(1 for m in markers_in_roi 
-                                       if m.roi_name == roi.name and m.cell_type == cell_type_name)
-                            writer.writerow([image_name, roi.name, cell_type_name, count])
-                    
-                exported_files.append(csv_path)
-            except Exception as e:
-                QMessageBox.warning(self, "Warning", f"Failed to export CSV: {e}")
-        
+            total_steps += 1
         if self.export_json_checkbox.isChecked():
-            json_path = self.export_json(base_path)
-            if json_path:
-                exported_files.append(json_path)
-        
+            total_steps += 1
         if self.export_image_checkbox.isChecked() and self.image_data is not None:
-            img_path = self.export_image(base_path)
-            if img_path:
-                exported_files.append(img_path)
+            total_steps += 1
         
-        if exported_files:
+        if total_steps == 0:
+            QMessageBox.warning(self, "No Export", "No export options selected.")
+            return
+        
+        # Create progress dialog
+        progress = QProgressDialog("Exporting...", "Cancel", 0, total_steps, self)
+        progress.setWindowTitle("Exporting Data")
+        progress.setWindowModality(Qt.WindowModality.WindowModal)
+        progress.setMinimumDuration(0)
+        progress.setValue(0)
+        progress.show()
+        QApplication.processEvents()
+        
+        exported_files = []
+        current_step = 0
+        cancelled = False
+        
+        try:
+            if self.export_csv_checkbox.isChecked():
+                if progress.wasCanceled():
+                    cancelled = True
+                else:
+                    progress.setLabelText("Exporting CSV...")
+                    QApplication.processEvents()
+                    
+                    csv_path = f"{base_path}_results.csv"
+                    try:
+                        with open(csv_path, 'w', newline='') as f:
+                            writer = csv.writer(f)
+                            image_name = Path(self.current_file).name
+                            
+                            # Write marker details section
+                            writer.writerow(["=== Marker Details ==="])
+                            writer.writerow(["Image", "Cell Type", "Marker #", "X", "Y", "ROI"])
+                            for marker in markers_in_roi:
+                                writer.writerow([
+                                    image_name, marker.cell_type, marker.marker_number,
+                                    f"{marker.position.x():.2f}", f"{marker.position.y():.2f}",
+                                    marker.roi_name
+                                ])
+                            
+                            # Write summary section with all combinations (including zeros)
+                            writer.writerow([])  # Empty row separator
+                            writer.writerow(["=== Summary (per ROI) ==="])
+                            writer.writerow(["Image", "ROI", "Cell Type", "Count"])
+                            
+                            for roi in closed_rois:
+                                for cell_type_name in self.cell_types.keys():
+                                    count = sum(1 for m in markers_in_roi 
+                                               if m.roi_name == roi.name and m.cell_type == cell_type_name)
+                                    writer.writerow([image_name, roi.name, cell_type_name, count])
+                            
+                        exported_files.append(csv_path)
+                    except Exception as e:
+                        QMessageBox.warning(self, "Warning", f"Failed to export CSV: {e}")
+                    
+                    current_step += 1
+                    progress.setValue(current_step)
+            
+            if self.export_json_checkbox.isChecked() and not cancelled:
+                if progress.wasCanceled():
+                    cancelled = True
+                else:
+                    progress.setLabelText("Exporting JSON...")
+                    QApplication.processEvents()
+                    
+                    json_path = self.export_json(base_path)
+                    if json_path:
+                        exported_files.append(json_path)
+                    
+                    current_step += 1
+                    progress.setValue(current_step)
+            
+            if self.export_image_checkbox.isChecked() and self.image_data is not None and not cancelled:
+                if progress.wasCanceled():
+                    cancelled = True
+                else:
+                    progress.setLabelText("Exporting overlay image...")
+                    QApplication.processEvents()
+                    
+                    img_path = self.export_image(base_path)
+                    if img_path:
+                        exported_files.append(img_path)
+                    
+                    current_step += 1
+                    progress.setValue(current_step)
+        
+        finally:
+            progress.close()
+        
+        if cancelled:
+            self.status_bar.showMessage("Export cancelled")
+        elif exported_files:
             self.status_bar.showMessage(f"Exported {len(exported_files)} file(s)")
             self.show_auto_dismiss_message(
                 "Export Complete", 
