@@ -33,7 +33,9 @@ python run_analyzer.py
 | Key | Action |
 |-----|--------|
 | R/G/B | Toggle channels |
-| Space | Toggle Pan/Count mode |
+| F | Count Mode |
+| D | ROI Mode |
+| Space | Toggle active cell type |
 | Ctrl+Z | Undo marker |
 | Ctrl+Shift+Z | Redo marker |
 
