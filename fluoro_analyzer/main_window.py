@@ -479,6 +479,7 @@ class FluoroAnalyzer(QMainWindow):
             'D': lambda: self.set_tool_mode(ToolMode.ROI_DRAW),
             'E': lambda: self.set_tool_mode(ToolMode.PAN),
             'V': self.canvas.reset_view,
+            'Shift+D': self.start_new_roi,
         }
         
         for key, callback in shortcuts.items():
