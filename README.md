@@ -35,10 +35,11 @@ python run_analyzer.py
 | R/G/B | Toggle channels |
 | F | Count Mode |
 | D | ROI Mode |
-| Shift+D | Add New ROI |
+| Shift+D | Add new ROI |
 | Space | Toggle active cell type |
 | Ctrl+Z | Undo marker |
 | Ctrl+Shift+Z | Redo marker |
+| Ctrl+S | Export results |
 
 ## License
 
