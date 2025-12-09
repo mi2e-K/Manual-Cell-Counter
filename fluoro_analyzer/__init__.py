@@ -16,7 +16,7 @@ from .image_processing import (
     apply_all_adjustments
 )
 
-__version__ = "2.1.0"
+__version__ = "1.0.0"
 __all__ = [
     'FluoroAnalyzer',
     'ChannelMode', 'MarkerType', 'ToolMode', 'LabelPosition',
