@@ -47,8 +47,8 @@ class FluoroAnalyzer(QMainWindow):
     
     def __init__(self):
         super().__init__()
-        self.setWindowTitle("Fluorescence Microscope Image Analyzer")
-        self.setMinimumSize(1200, 800)
+        self.setWindowTitle("FluoroCount")
+        self.setMinimumSize(1600, 1000)
         
         # Data
         self.image_data: Optional[np.ndarray] = None  # Original image data
@@ -83,6 +83,11 @@ class FluoroAnalyzer(QMainWindow):
         self.image_adjustments = ImageAdjustments()
         self.preserve_adjustments_on_load = True
         self.adjustments_dialog: Optional[AdjustmentsDialog] = None
+        
+        # Batch processing
+        self.batch_files: list[str] = []
+        self.batch_index: int = 0
+        self.batch_mode: bool = False
         
         # Setup UI
         self.setup_ui()
@@ -270,8 +275,8 @@ class FluoroAnalyzer(QMainWindow):
         
         # Cell type controls
         cell_group = QGroupBox("Cell Types")
-        cell_group.setMinimumHeight(250)
-        cell_group.setMaximumHeight(350)
+        cell_group.setMinimumHeight(350)
+        cell_group.setMaximumHeight(400)
         cell_layout = QVBoxLayout(cell_group)
         
         # Active type selection
@@ -458,6 +463,24 @@ class FluoroAnalyzer(QMainWindow):
         import_action = QAction("📥 Import", self)
         import_action.triggered.connect(self.import_coordinates_dialog)
         toolbar.addAction(import_action)
+        
+        toolbar.addSeparator()
+        
+        batch_action = QAction("📋 Batch", self)
+        batch_action.setToolTip("Batch process multiple images")
+        batch_action.triggered.connect(self.start_batch_processing)
+        toolbar.addAction(batch_action)
+        
+        self.stop_batch_action = QAction("⏹ Stop", self)
+        self.stop_batch_action.setToolTip("Stop batch processing (Escape)")
+        self.stop_batch_action.triggered.connect(self.confirm_stop_batch)
+        self.stop_batch_action.setEnabled(False)
+        toolbar.addAction(self.stop_batch_action)
+        
+        # Batch status label
+        self.batch_status_label = QLabel("")
+        self.batch_status_label.setStyleSheet("color: #4fc3f7; font-weight: bold; margin-left: 10px;")
+        toolbar.addWidget(self.batch_status_label)
     
     def setup_shortcuts(self):
         """Setup keyboard shortcuts."""
@@ -473,7 +496,8 @@ class FluoroAnalyzer(QMainWindow):
             'Ctrl+Z': self.undo_last_marker,
             'Ctrl+Shift+Z': self.redo_marker,
             'Ctrl+S': self.export_all,
-            'Escape': self.cancel_roi,
+            'Ctrl+Shift+S': self.skip_batch_image,
+            'Escape': self.handle_escape,
             'Space': self.cycle_active_cell_type,
             'F': lambda: self.set_tool_mode(ToolMode.CELL_COUNT),
             'D': lambda: self.set_tool_mode(ToolMode.ROI_DRAW),
@@ -485,6 +509,19 @@ class FluoroAnalyzer(QMainWindow):
         for key, callback in shortcuts.items():
             shortcut = QShortcut(QKeySequence(key), self)
             shortcut.activated.connect(callback)
+    
+    def handle_escape(self):
+        """Handle Escape key - cancel ROI or batch processing."""
+        if self.current_roi:
+            self.cancel_roi()
+        elif self.batch_mode:
+            reply = QMessageBox.question(
+                self, "Cancel Batch Processing",
+                f"Cancel batch processing?\n\nProcessed {self.batch_index} of {len(self.batch_files)} images.",
+                QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No
+            )
+            if reply == QMessageBox.StandardButton.Yes:
+                self.cancel_batch_processing()
     
     def toggle_red_channel(self):
         self.red_checkbox.setChecked(not self.red_checkbox.isChecked())
@@ -498,8 +535,8 @@ class FluoroAnalyzer(QMainWindow):
     def setup_default_cell_types(self):
         """Setup default cell types."""
         defaults = [
-            CellType("Type 1", QColor(255, 100, 100), MarkerType.CIRCLE, 20),
-            CellType("Type 2", QColor(100, 255, 100), MarkerType.CIRCLE, 20),
+            CellType("Type 1", QColor(255, 255, 255), MarkerType.CIRCLE, 20),
+            CellType("Type 2", QColor(255, 0, 255), MarkerType.DOT, 10, LabelPosition.TOP),
         ]
         
         for ct in defaults:
@@ -801,11 +838,24 @@ class FluoroAnalyzer(QMainWindow):
     
     def open_file(self):
         """Open a file dialog to select an image."""
+        # Warn if in batch mode
+        if self.batch_mode:
+            reply = QMessageBox.question(
+                self, "Batch Mode Active",
+                "You are currently in batch processing mode.\n\n"
+                "Do you want to cancel loading a new image and continue batch processing?",
+                QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No
+            )
+            if reply == QMessageBox.StandardButton.Yes:
+                return  # Cancel loading, continue batch
+        
         file_path, _ = QFileDialog.getOpenFileName(
             self, "Open Image",
             "", "Image Files (*.tif *.tiff *.png *.jpg *.jpeg);;All Files (*)"
         )
         if file_path:
+            if self.batch_mode:
+                self.cancel_batch_processing()
             self.load_image(file_path)
     
     def browse_output_dir(self):
@@ -890,22 +940,37 @@ class FluoroAnalyzer(QMainWindow):
             self.update_display(reset_view=True)
             self.update_image_info()
             self.update_results_table()
+            
+            # Update window title
+            title = f"Fluorescence Microscope Image Analyzer - {path.name}"
+            if self.batch_mode:
+                title += f" [{self.batch_index + 1}/{len(self.batch_files)}]"
+            self.setWindowTitle(title)
+            
             self.status_bar.showMessage(f"Loaded: {path.name}")
             
             # Restore focus to main window for shortcuts to work
             self.activateWindow()
             self.setFocus()
             
-            # Check for existing coordinate file
+            # Check for existing coordinate file (skip prompt in batch mode)
             coord_file = path.parent / f"{path.stem}_coordinates.json"
             if coord_file.exists():
-                reply = QMessageBox.question(
-                    self, "Load Coordinates",
-                    f"Found coordinate data for this image:\n{coord_file.name}\n\nLoad markers and ROIs?",
-                    QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No
-                )
-                if reply == QMessageBox.StandardButton.Yes:
+                if self.batch_mode:
+                    # Auto-load coordinates in batch mode
                     self.import_coordinates(str(coord_file))
+                else:
+                    reply = QMessageBox.question(
+                        self, "Load Coordinates",
+                        f"Found coordinate data for this image:\n{coord_file.name}\n\nLoad markers and ROIs?",
+                        QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No
+                    )
+                    if reply == QMessageBox.StandardButton.Yes:
+                        self.import_coordinates(str(coord_file))
+            
+            # In batch mode, auto-start new ROI if no ROIs exist
+            if self.batch_mode and not self.rois:
+                QTimer.singleShot(100, self.start_new_roi)
             
         except Exception as e:
             QMessageBox.critical(self, "Error", f"Failed to load image:\n{str(e)}")
@@ -1020,6 +1085,7 @@ class FluoroAnalyzer(QMainWindow):
             pos = marker.position
             size = cell_type.marker_size
             color = cell_type.color
+            offset = cell_type.label_offset
             
             # Highlight selected marker
             is_selected = (idx == self.selected_marker_index)
@@ -1031,7 +1097,13 @@ class FluoroAnalyzer(QMainWindow):
             brush = QBrush(QColor(color.red(), color.green(), color.blue(), 80 if is_selected else 50))
             
             if cell_type.marker_type == MarkerType.DOT:
-                item = QGraphicsEllipseItem(pos.x() - 3, pos.y() - 3, 6, 6)
+                # DOT uses size for diameter, with scaled pen width
+                dot_size = max(3, size)
+                pen_width = max(1, size // 6)
+                pen.setWidth(pen_width + 1 if is_selected else pen_width)
+                item = QGraphicsEllipseItem(
+                    pos.x() - dot_size/2, pos.y() - dot_size/2, dot_size, dot_size
+                )
                 item.setPen(pen)
                 item.setBrush(QBrush(color))
             elif cell_type.marker_type == MarkerType.CIRCLE:
@@ -1052,7 +1124,7 @@ class FluoroAnalyzer(QMainWindow):
             self.marker_items.append(item)
             
             # Calculate label position based on cell type setting
-            font = QFont("Arial", 12, QFont.Weight.Bold)
+            font = QFont("Arial", cell_type.label_size, QFont.Weight.Bold)
             text_item = QGraphicsTextItem(str(marker.marker_number))
             text_item.setDefaultTextColor(color)
             text_item.setFont(font)
@@ -1063,31 +1135,31 @@ class FluoroAnalyzer(QMainWindow):
             
             label_pos = cell_type.label_position
             if label_pos == LabelPosition.RIGHT:
-                text_x = pos.x() + size/2 + 2
+                text_x = pos.x() + size/2 + offset
                 text_y = pos.y() - th/2
             elif label_pos == LabelPosition.LEFT:
-                text_x = pos.x() - size/2 - tw - 2
+                text_x = pos.x() - size/2 - tw - offset
                 text_y = pos.y() - th/2
             elif label_pos == LabelPosition.TOP:
                 text_x = pos.x() - tw/2
-                text_y = pos.y() - size/2 - th - 2
+                text_y = pos.y() - size/2 - th - offset
             elif label_pos == LabelPosition.BOTTOM:
                 text_x = pos.x() - tw/2
-                text_y = pos.y() + size/2 + 2
+                text_y = pos.y() + size/2 + offset
             elif label_pos == LabelPosition.TOP_RIGHT:
-                text_x = pos.x() + size/2 + 2
+                text_x = pos.x() + size/2 + offset
                 text_y = pos.y() - size/2 - th
             elif label_pos == LabelPosition.TOP_LEFT:
-                text_x = pos.x() - size/2 - tw - 2
+                text_x = pos.x() - size/2 - tw - offset
                 text_y = pos.y() - size/2 - th
             elif label_pos == LabelPosition.BOTTOM_RIGHT:
-                text_x = pos.x() + size/2 + 2
+                text_x = pos.x() + size/2 + offset
                 text_y = pos.y() + size/2
             elif label_pos == LabelPosition.BOTTOM_LEFT:
-                text_x = pos.x() - size/2 - tw - 2
+                text_x = pos.x() - size/2 - tw - offset
                 text_y = pos.y() + size/2
             else:
-                text_x = pos.x() + size/2 + 2
+                text_x = pos.x() + size/2 + offset
                 text_y = pos.y() - th/2
             
             text_item.setPos(text_x, text_y)
@@ -1273,10 +1345,15 @@ class FluoroAnalyzer(QMainWindow):
             self.current_roi = None
             self.canvas.clear_temp_line()
             self.canvas.last_roi_point = None
-            self.set_tool_mode(ToolMode.ROI_DRAW)
             self.refresh_rois()
             self.update_results_table()
             self.status_bar.showMessage("ROI closed")
+            
+            # In batch mode, auto-switch to count mode after closing ROI
+            if self.batch_mode:
+                self.set_tool_mode(ToolMode.CELL_COUNT)
+            else:
+                self.set_tool_mode(ToolMode.ROI_DRAW)
         elif self.current_roi:
             self.status_bar.showMessage(f"ROI needs at least 3 points")
     
@@ -1577,15 +1654,38 @@ class FluoroAnalyzer(QMainWindow):
                     color = (cell_type.color.red(), cell_type.color.green(), cell_type.color.blue())
                     pos = (int(marker.position.x()), int(marker.position.y()))
                     size = cell_type.marker_size // 2
+                    offset = cell_type.label_offset
+                    
+                    # Create font with proper size
+                    try:
+                        marker_font = ImageFont.truetype("/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf", cell_type.label_size)
+                    except:
+                        marker_font = font
                     
                     if cell_type.marker_type == MarkerType.DOT:
-                        draw.ellipse([pos[0]-3, pos[1]-3, pos[0]+3, pos[1]+3], fill=color)
+                        dot_radius = max(2, cell_type.marker_size // 2)
+                        draw.ellipse([pos[0]-dot_radius, pos[1]-dot_radius, pos[0]+dot_radius, pos[1]+dot_radius], fill=color)
                     elif cell_type.marker_type == MarkerType.CIRCLE:
                         draw.ellipse([pos[0]-size, pos[1]-size, pos[0]+size, pos[1]+size], outline=color, width=2)
                     else:
                         draw.rectangle([pos[0]-size, pos[1]-size, pos[0]+size, pos[1]+size], outline=color, width=2)
                     
-                    draw.text((pos[0] + size + 2, pos[1] - size), str(marker.marker_number), fill=color, font=font)
+                    # Position label based on label_position setting
+                    label_text = str(marker.marker_number)
+                    label_pos = cell_type.label_position
+                    
+                    if label_pos == LabelPosition.RIGHT:
+                        text_pos = (pos[0] + size + offset, pos[1] - cell_type.label_size // 2)
+                    elif label_pos == LabelPosition.LEFT:
+                        text_pos = (pos[0] - size - offset - len(label_text) * cell_type.label_size // 2, pos[1] - cell_type.label_size // 2)
+                    elif label_pos == LabelPosition.TOP:
+                        text_pos = (pos[0] - len(label_text) * cell_type.label_size // 4, pos[1] - size - cell_type.label_size - offset)
+                    elif label_pos == LabelPosition.BOTTOM:
+                        text_pos = (pos[0] - len(label_text) * cell_type.label_size // 4, pos[1] + size + offset)
+                    else:
+                        text_pos = (pos[0] + size + offset, pos[1] - cell_type.label_size // 2)
+                    
+                    draw.text(text_pos, label_text, fill=color, font=marker_font)
             
             output_path = f"{base_path}_overlay.png"
             img.save(output_path, 'PNG', optimize=True)
@@ -1780,12 +1880,136 @@ class FluoroAnalyzer(QMainWindow):
         
         if cancelled:
             self.status_bar.showMessage("Export cancelled")
+            if self.batch_mode:
+                self.cancel_batch_processing()
         elif exported_files:
             self.status_bar.showMessage(f"Exported {len(exported_files)} file(s)")
-            self.show_auto_dismiss_message(
-                "Export Complete", 
-                f"Exported {len(exported_files)} file(s):\n" + "\n".join([Path(f).name for f in exported_files])
-            )
+            if not self.batch_mode:
+                self.show_auto_dismiss_message(
+                    "Export Complete", 
+                    f"Exported {len(exported_files)} file(s):\n" + "\n".join([Path(f).name for f in exported_files])
+                )
+            else:
+                # In batch mode, load next image after short delay
+                QTimer.singleShot(300, self.load_next_batch_image)
+    
+    def start_batch_processing(self):
+        """Start batch processing multiple images."""
+        file_paths, _ = QFileDialog.getOpenFileNames(
+            self, "Select Images for Batch Processing",
+            "",
+            "Image Files (*.tif *.tiff *.png *.jpg *.jpeg);;All Files (*)"
+        )
+        
+        if not file_paths:
+            return
+        
+        if len(file_paths) == 1:
+            # Just load single file normally
+            self.load_image(file_paths[0])
+            return
+        
+        # Initialize batch processing
+        self.batch_files = file_paths
+        self.batch_index = 0
+        self.batch_mode = True
+        
+        # Update batch status
+        self.update_batch_status()
+        
+        # Show instructions
+        QMessageBox.information(
+            self, "Batch Processing Started",
+            f"Loaded {len(self.batch_files)} images for batch processing.\n\n"
+            "Workflow:\n"
+            "1. ROI drawing starts automatically - draw ROI points\n"
+            "2. Right-click to close ROI → auto-switches to Count mode\n"
+            "3. Count cells, then Ctrl+S to export and load next image\n"
+            "4. Ctrl+Shift+S to skip image without exporting\n"
+            "5. Click ⏹ Stop or press Escape to cancel\n\n"
+            f"Starting with: {Path(self.batch_files[0]).name}"
+        )
+        
+        # Load first image
+        self.load_image(self.batch_files[0])
+    
+    def load_next_batch_image(self):
+        """Load the next image in batch processing."""
+        if not self.batch_mode or not self.batch_files:
+            return
+        
+        self.batch_index += 1
+        
+        if self.batch_index >= len(self.batch_files):
+            # Batch processing complete
+            self.complete_batch_processing()
+            return
+        
+        # Update status
+        self.update_batch_status()
+        
+        # Load next image
+        next_file = self.batch_files[self.batch_index]
+        self.status_bar.showMessage(f"Loading next image: {Path(next_file).name}")
+        self.load_image(next_file)
+    
+    def update_batch_status(self):
+        """Update the batch status display."""
+        if self.batch_mode and self.batch_files:
+            current = self.batch_index + 1
+            total = len(self.batch_files)
+            self.batch_status_label.setText(f"Batch: {current}/{total}")
+            self.stop_batch_action.setEnabled(True)
+        else:
+            self.batch_status_label.setText("")
+            self.stop_batch_action.setEnabled(False)
+    
+    def confirm_stop_batch(self):
+        """Confirm and stop batch processing."""
+        if not self.batch_mode:
+            return
+        
+        reply = QMessageBox.question(
+            self, "Stop Batch Processing",
+            f"Stop batch processing?\n\nProcessed {self.batch_index} of {len(self.batch_files)} images.",
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No
+        )
+        if reply == QMessageBox.StandardButton.Yes:
+            self.cancel_batch_processing()
+    
+    def cancel_batch_processing(self):
+        """Cancel batch processing."""
+        if self.batch_mode:
+            self.batch_mode = False
+            self.batch_files.clear()
+            self.batch_index = 0
+            self.update_batch_status()
+            self.setWindowTitle("Fluorescence Microscope Image Analyzer")
+            self.status_bar.showMessage("Batch processing cancelled")
+    
+    def skip_batch_image(self):
+        """Skip current image in batch mode without exporting."""
+        if not self.batch_mode:
+            self.status_bar.showMessage("Not in batch mode")
+            return
+        
+        self.status_bar.showMessage(f"Skipped: {Path(self.current_file).name}")
+        self.load_next_batch_image()
+    
+    def complete_batch_processing(self):
+        """Complete batch processing."""
+        total = len(self.batch_files)
+        self.batch_mode = False
+        self.batch_files.clear()
+        self.batch_index = 0
+        self.update_batch_status()
+        self.setWindowTitle("Fluorescence Microscope Image Analyzer")
+        
+        self.show_auto_dismiss_message(
+            "Batch Processing Complete",
+            f"Successfully processed {total} images."
+        )
+        self.status_bar.showMessage(f"Batch processing complete: {total} images processed")
     
     def import_coordinates_dialog(self):
         """Open file dialog to import coordinates."""
@@ -1909,4 +2133,16 @@ class FluoroAnalyzer(QMainWindow):
         if urls:
             file_path = urls[0].toLocalFile()
             if file_path.lower().endswith(('.tif', '.tiff', '.png', '.jpg', '.jpeg')):
+                # Warn if in batch mode
+                if self.batch_mode:
+                    reply = QMessageBox.question(
+                        self, "Batch Mode Active",
+                        "You are currently in batch processing mode.\n\n"
+                        "Do you want to cancel loading this image and continue batch processing?",
+                        QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No
+                    )
+                    if reply == QMessageBox.StandardButton.Yes:
+                        return  # Cancel loading, continue batch
+                    self.cancel_batch_processing()
+                
                 self.load_image(file_path)

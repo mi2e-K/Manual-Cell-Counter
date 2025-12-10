@@ -56,6 +56,8 @@ class CellType:
     marker_type: MarkerType
     marker_size: int
     label_position: LabelPosition = LabelPosition.RIGHT
+    label_size: int = 12
+    label_offset: int = 2
     count: int = 0
 
 

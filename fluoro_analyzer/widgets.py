@@ -27,7 +27,7 @@ class CellTypeWidget(QWidget):
     def setup_ui(self):
         main_layout = QVBoxLayout(self)
         main_layout.setContentsMargins(4, 4, 4, 4)
-        main_layout.setSpacing(2)
+        main_layout.setSpacing(3)
         
         # Row 1: Name, Color, Count, Delete
         row1 = QHBoxLayout()
@@ -75,7 +75,7 @@ class CellTypeWidget(QWidget):
         
         main_layout.addLayout(row1)
         
-        # Row 2: Marker type, Size, Label position
+        # Row 2: Marker type, Size
         row2 = QHBoxLayout()
         row2.setSpacing(4)
         
@@ -90,13 +90,14 @@ class CellTypeWidget(QWidget):
         row2.addWidget(self.marker_combo)
         
         # Size
+        #row2.addWidget(QLabel("Size:"))
         self.size_spin = QSpinBox()
-        self.size_spin.setRange(5, 100)
+        self.size_spin.setRange(3, 100)
         self.size_spin.setValue(self.cell_type.marker_size)
         self.size_spin.setFixedWidth(70)
         self.size_spin.valueChanged.connect(self.size_changed)
         row2.addWidget(self.size_spin)
-        
+
         # Label position
         row2.addWidget(QLabel("Label:"))
         self.label_pos_combo = QComboBox()
@@ -122,6 +123,33 @@ class CellTypeWidget(QWidget):
         
         row2.addStretch()
         main_layout.addLayout(row2)
+        
+        # Row 3: Label position, Label size, Label offset
+        row3 = QHBoxLayout()
+        row3.setSpacing(4)
+        
+        # Label size
+        row3.addWidget(QLabel("Font:"))
+        self.label_size_spin = QSpinBox()
+        self.label_size_spin.setRange(6, 36)
+        self.label_size_spin.setValue(self.cell_type.label_size)
+        self.label_size_spin.setFixedWidth(70)
+        self.label_size_spin.setToolTip("Label font size")
+        self.label_size_spin.valueChanged.connect(self.label_size_changed)
+        row3.addWidget(self.label_size_spin)
+        
+        # Label offset
+        row3.addWidget(QLabel("Gap:"))
+        self.label_offset_spin = QSpinBox()
+        self.label_offset_spin.setRange(0, 50)
+        self.label_offset_spin.setValue(self.cell_type.label_offset)
+        self.label_offset_spin.setFixedWidth(70)
+        self.label_offset_spin.setToolTip("Gap between marker and label")
+        self.label_offset_spin.valueChanged.connect(self.label_offset_changed)
+        row3.addWidget(self.label_offset_spin)
+        
+        row3.addStretch()
+        main_layout.addLayout(row3)
         
         # Add a subtle border/background to separate cell types
         self.setStyleSheet("""
@@ -161,6 +189,14 @@ class CellTypeWidget(QWidget):
     
     def label_pos_changed(self, index):
         self.cell_type.label_position = self.label_pos_combo.currentData()
+        self.type_changed.emit()
+    
+    def label_size_changed(self, value):
+        self.cell_type.label_size = value
+        self.type_changed.emit()
+    
+    def label_offset_changed(self, value):
+        self.cell_type.label_offset = value
         self.type_changed.emit()
     
     def update_count(self, count: int):

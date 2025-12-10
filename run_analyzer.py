@@ -19,7 +19,7 @@ from fluoro_analyzer import FluoroAnalyzer
 def main():
     """Main entry point."""
     app = QApplication(sys.argv)
-    app.setApplicationName("Fluorescence Microscope Image Analyzer")
+    app.setApplicationName("FluoroCount")
     app.setApplicationVersion("1.0.0")
     
     window = FluoroAnalyzer()
